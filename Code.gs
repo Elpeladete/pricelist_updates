@@ -249,13 +249,13 @@ function parsearPDF() {
     // Usamos la API REST directamente para evitar habilitar el servicio avanzado de Drive.
     var token    = ScriptApp.getOAuthToken();
     var response = UrlFetchApp.fetch(
-      'https://www.googleapis.com/drive/v2/files/' + PDF_ID + '/copy',
+      'https://www.googleapis.com/drive/v3/files/' + PDF_ID + '/copy',
       {
         method      : 'post',
         contentType : 'application/json',
         headers     : { 'Authorization': 'Bearer ' + token },
         payload     : JSON.stringify({
-          title    : 'ocr_tmp_pricelist_' + Date.now(),
+          name     : 'ocr_tmp_pricelist_' + Date.now(),
           mimeType : 'application/vnd.google-apps.document'
         })
       }
