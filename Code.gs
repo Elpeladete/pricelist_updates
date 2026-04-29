@@ -244,11 +244,22 @@ function obtenerMapaPDF() {
 function parsearPDF() {
   var copiaTempId = null;
   try {
-    // Crear copia como Google Doc para que Drive aplique OCR automáticamente
-    var copia = Drive.Files.copy(
-      { title: 'ocr_tmp_pricelist_' + Date.now(), mimeType: 'application/vnd.google-apps.document' },
-      PDF_ID
+    // Crear copia como Google Doc para que Drive aplique OCR automáticamente.
+    // Usamos la API REST directamente para evitar habilitar el servicio avanzado de Drive.
+    var token    = ScriptApp.getOAuthToken();
+    var response = UrlFetchApp.fetch(
+      'https://www.googleapis.com/drive/v2/files/' + PDF_ID + '/copy',
+      {
+        method      : 'post',
+        contentType : 'application/json',
+        headers     : { 'Authorization': 'Bearer ' + token },
+        payload     : JSON.stringify({
+          title    : 'ocr_tmp_pricelist_' + Date.now(),
+          mimeType : 'application/vnd.google-apps.document'
+        })
+      }
     );
+    var copia = JSON.parse(response.getContentText());
     copiaTempId = copia.id;
     Utilities.sleep(5000);  // Esperar a que el OCR termine
 
