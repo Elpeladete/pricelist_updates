@@ -1,3 +1,4 @@
+// Última actualización: 2026-04-29 08:40 (clasp push)
 // =============================================================================
 // CONFIGURACIÓN — Modificar solo estos valores si cambian los IDs o nombres
 // =============================================================================
