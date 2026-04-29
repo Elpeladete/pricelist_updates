@@ -1,50 +1,30 @@
-// Última actualización: 2026-04-29 08:40 (clasp push)
+﻿// Última actualización: 2026-04-29 — fuente unificada (nueva planilla)
 // =============================================================================
 // CONFIGURACIÓN — Modificar solo estos valores si cambian los IDs o nombres
 // =============================================================================
 
-var ORIGEN_ID  = "1SeUISHBX7Zep0U6yCClz1z6pU2aWrAklqI2OBIcOa2c";
+// Planilla ORIGEN: col A = "[SKU / INTERNO] descripción", col B = "USD X,XX"
+var ORIGEN_ID   = "1xVIFLsVGg4-GF65BkeM2xkGDlGAp6pH_91dgX31WyT0";
+var ORIGEN_HOJA = "";  // Nombre de la hoja. Vacío = primera hoja del archivo.
+
+// Planilla DESTINO: col A = CODIGO DYE, col B = CODIGO DJI, col X = precio actualizado
 var DESTINO_ID = "1x5nI3DsJOhcYnO71rQww_vXYteTGvXcbGLhCPUCEw4w";
 
-var DESTINO_HOJA           = "PEDIDOS ACTUALIZADOS";
-var DESTINO_COL_CODIGODYE  = 1;   // Columna A  → "CODIGO DYE"
-var DESTINO_COL_CODIGO     = 2;   // Columna B  → "CODIGO DJI"
-var DESTINO_COL_PRECIO     = 24;  // Columna X  → "Precio actualizado"
-var DESTINO_FILA_INICIO    = 2;   // Primera fila de datos (fila 1 = encabezados)
-
-// Lista de hojas del archivo DESTINO a procesar.
-// Todas comparten la misma estructura: col A = CODIGO DYE, col B = CODIGO DJI, col X = precio.
+// Hojas del destino a procesar
 var HOJAS_DESTINO = [
   { nombre: "PEDIDOS ACTUALIZADOS", colDYE: 1, colDJI: 2, colPrecio: 24, filaInicio: 2 },
   { nombre: "DRON T100",            colDYE: 1, colDJI: 2, colPrecio: 24, filaInicio: 2 },
 ];
 
-// Definición de las hojas del archivo origen.
-// colPrecio   → índice base 1 de la columna con el precio
-// colInterno  → índice base 1 de la columna "Código interno" (búsqueda secundaria por CODIGO DYE)
-var HOJAS_ORIGEN = [
-  { nombre: "T100",   colPrecio: 7, colInterno: 2 },  // Precio: Col G | Código interno: Col B
-  { nombre: "T70p",   colPrecio: 7, colInterno: 2 },  // Precio: Col G | Código interno: Col B
-  { nombre: "D14000", colPrecio: 6, colInterno: 1 },  // Precio: Col F | Código interno: Col A
-];
-
-var TEXTO_NO_ENCONTRADO  = "NO ENCONTRADO";
-var ENCABEZADO_SKU       = "Código SKU";      // Encabezado en origen para búsqueda por CODIGO DJI
-var ENCABEZADO_INTERNO   = "Código interno";  // Encabezado en origen para búsqueda por CODIGO DYE
-
-// Fuente terciaria: PDF en Google Drive
-// Formato en PDF: [CODIGO_DJI / CODIGO_DYE] Descripción ... USD X,XX
-var PDF_ID        = "1358QcGtL3-Cto59ho9OCYTk1jZcUn7pO";
-var PDF_CACHE_KEY = "mapaPDF_v1";  // Cambiar la versión fuerza re-parseo
+var TEXTO_NO_ENCONTRADO = "NO ENCONTRADO";
 
 // =============================================================================
 // NORMALIZACIÓN DE CÓDIGOS
 // =============================================================================
 
 /**
- * Elimina el último segmento separado por punto de un código.
- * Ejemplo: "CP.AG.00000575.01" → "CP.AG.00000575"
- * Si el código no tiene punto, devuelve el mismo código sin cambios.
+ * Elimina el último segmento separado por punto.
+ * "CP.AG.575.01" → "CP.AG.575"
  */
 function normalizarCodigo(codigo) {
   var ultimoPunto = codigo.lastIndexOf('.');
@@ -53,8 +33,8 @@ function normalizarCodigo(codigo) {
 }
 
 /**
- * Elimina todos los guiones de un código.
- * Ejemplo: "DJI-R891" → "DJIR891"
+ * Elimina todos los guiones.
+ * "DJI-R891" → "DJIR891"
  */
 function sinGuiones(codigo) {
   return codigo.replace(/-/g, '');
@@ -65,33 +45,18 @@ function sinGuiones(codigo) {
 // =============================================================================
 
 /**
- * Lee los códigos DJI del archivo destino, los busca en el archivo origen
- * y escribe el precio actualizado en la columna X.
- * Se ejecuta automáticamente cada 6 horas (ver instalarTrigger).
+ * Lee los precios de la planilla origen y los escribe en cada hoja destino.
+ * Se ejecuta automáticamente cada 1 hora (ver instalarTrigger).
  */
 function actualizarPrecios() {
   try {
-    // ------------------------------------------------------------------
-    // 1. Construir mapas de lookup desde el archivo origen (una sola vez)
-    // ------------------------------------------------------------------
-    var ssOrigen = SpreadsheetApp.openById(ORIGEN_ID);
-    var mapas    = construirMapasLookup(ssOrigen);
-
-    // ------------------------------------------------------------------
-    // 2. Cargar mapa del PDF (cacheado en PropertiesService)
-    // ------------------------------------------------------------------
-    var mapaPDF = obtenerMapaPDF();
-
-    // ------------------------------------------------------------------
-    // 3. Procesar cada hoja del archivo destino
-    // ------------------------------------------------------------------
+    var ssOrigen  = SpreadsheetApp.openById(ORIGEN_ID);
+    var mapas     = construirMapasLookup(ssOrigen);
     var ssDestino = SpreadsheetApp.openById(DESTINO_ID);
 
     for (var h = 0; h < HOJAS_DESTINO.length; h++) {
-      var def = HOJAS_DESTINO[h];
-      procesarHojaDestino(ssDestino, def, mapas, mapaPDF);
+      procesarHojaDestino(ssDestino, HOJAS_DESTINO[h], mapas);
     }
-
   } catch (e) {
     Logger.log("ERROR en actualizarPrecios: " + e.message);
     throw e;
@@ -99,18 +64,10 @@ function actualizarPrecios() {
 }
 
 // =============================================================================
-// FUNCIÓN AUXILIAR: procesar una hoja del destino
+// PROCESAR HOJA DESTINO
 // =============================================================================
 
-/**
- * Lee los códigos de una hoja del archivo destino, busca los precios en los
- * mapas del origen y escribe los resultados en la columna de precio indicada.
- *
- * @param {Spreadsheet} ssDestino - Spreadsheet del archivo destino.
- * @param {Object}      def       - Definición de la hoja: { nombre, colDYE, colDJI, colPrecio, filaInicio }.
- * @param {Object}      mapas     - Mapas de lookup construidos por construirMapasLookup().
- */
-function procesarHojaDestino(ssDestino, def, mapas, mapaPDF) {
+function procesarHojaDestino(ssDestino, def, mapas) {
   var hoja = ssDestino.getSheetByName(def.nombre);
   if (!hoja) {
     Logger.log('ADVERTENCIA: Hoja destino "' + def.nombre + '" no encontrada. Se omite.');
@@ -123,10 +80,9 @@ function procesarHojaDestino(ssDestino, def, mapas, mapaPDF) {
     return;
   }
 
-  var filasData    = ultimaFila - def.filaInicio + 1;
-  var rangoCodigos = hoja.getRange(def.filaInicio, def.colDYE, filasData, 2);
-  var codigos      = rangoCodigos.getValues();  // [[dyeCod, djiCod], ...]
-  var precios      = [];
+  var filasData = ultimaFila - def.filaInicio + 1;
+  var codigos   = hoja.getRange(def.filaInicio, def.colDYE, filasData, 2).getValues();
+  var precios   = [];
 
   for (var i = 0; i < codigos.length; i++) {
     var codigoDYE = String(codigos[i][0]).trim();  // Col A — CODIGO DYE
@@ -137,77 +93,8 @@ function procesarHojaDestino(ssDestino, def, mapas, mapaPDF) {
       continue;
     }
 
-    var precioEncontrado = null;
-
-    // ---- BÚSQUEDA PRIMARIA: CODIGO DJI → "Código SKU" del origen ----
-    if (codigoDJI !== "" && codigoDJI !== "0") {
-      var codigoDJIBase = normalizarCodigo(codigoDJI);
-      for (var j = 0; j < HOJAS_ORIGEN.length; j++) {
-        var entrada = mapas[HOJAS_ORIGEN[j].nombre];
-        if (!entrada) continue;
-        if (entrada.exacto.hasOwnProperty(codigoDJI)) {
-          precioEncontrado = entrada.exacto[codigoDJI]; break;
-        }
-        if (codigoDJIBase !== codigoDJI && entrada.exacto.hasOwnProperty(codigoDJIBase)) {
-          precioEncontrado = entrada.exacto[codigoDJIBase]; break;
-        }
-        if (entrada.base.hasOwnProperty(codigoDJI)) {
-          precioEncontrado = entrada.base[codigoDJI]; break;
-        }
-      }
-    }
-
-    // ---- BÚSQUEDA SECUNDARIA: CODIGO DYE → "Código interno" del origen ----
-    if (precioEncontrado === null && codigoDYE !== "" && codigoDYE !== "0") {
-      var codigoDYEBase = normalizarCodigo(codigoDYE);
-      var codigoDYENorm = sinGuiones(codigoDYE);  // e.g. "DJIR891" para buscar "DJI-R891" en origen
-      for (var k = 0; k < HOJAS_ORIGEN.length; k++) {
-        var entradaDYE = mapas[HOJAS_ORIGEN[k].nombre];
-        if (!entradaDYE) continue;
-        // 1. Exacto
-        if (entradaDYE.interno.hasOwnProperty(codigoDYE)) {
-          precioEncontrado = entradaDYE.interno[codigoDYE]; break;
-        }
-        // 2. Sin último segmento
-        if (codigoDYEBase !== codigoDYE && entradaDYE.interno.hasOwnProperty(codigoDYEBase)) {
-          precioEncontrado = entradaDYE.interno[codigoDYEBase]; break;
-        }
-        // 3. Origen con sufijo, destino sin él
-        if (entradaDYE.internoBase.hasOwnProperty(codigoDYE)) {
-          precioEncontrado = entradaDYE.internoBase[codigoDYE]; break;
-        }
-        // 4. Sin guiones (DJI-R891 ↔ DJIR891)
-        if (codigoDYENorm !== codigoDYE && entradaDYE.internoNorm.hasOwnProperty(codigoDYENorm)) {
-          precioEncontrado = entradaDYE.internoNorm[codigoDYENorm]; break;
-        }
-        // 5. Sin guiones buscando el código del destino directamente en internoNorm
-        if (entradaDYE.internoNorm.hasOwnProperty(codigoDYE)) {
-          precioEncontrado = entradaDYE.internoNorm[codigoDYE]; break;
-        }
-      }
-    }
-      // ---- BÚSQUEDA TERCIARIA: PDF (fallback final) ----
-      // Solo si las búsquedas primaria y secundaria no encontraron precio.
-      // En el PDF: [CODIGO_DJI / CODIGO_DYE] → el primero es DJI, el segundo es DYE.
-      if (precioEncontrado === null && mapaPDF) {
-        // Intentar con CODIGO DJI (col B)
-        if (codigoDJI !== "" && codigoDJI !== "0") {
-          var djiNorm = sinGuiones(codigoDJI);
-          var djiBase = normalizarCodigo(codigoDJI);
-          if      (mapaPDF.hasOwnProperty(codigoDJI)) { precioEncontrado = mapaPDF[codigoDJI]; }
-          else if (mapaPDF.hasOwnProperty(djiNorm))   { precioEncontrado = mapaPDF[djiNorm]; }
-          else if (djiBase !== codigoDJI && mapaPDF.hasOwnProperty(djiBase)) { precioEncontrado = mapaPDF[djiBase]; }
-        }
-        // Intentar con CODIGO DYE (col A) si DJI no resolvió
-        if (precioEncontrado === null && codigoDYE !== "" && codigoDYE !== "0") {
-          var dyeNorm = sinGuiones(codigoDYE);
-          var dyeBase = normalizarCodigo(codigoDYE);
-          if      (mapaPDF.hasOwnProperty(codigoDYE)) { precioEncontrado = mapaPDF[codigoDYE]; }
-          else if (mapaPDF.hasOwnProperty(dyeNorm))   { precioEncontrado = mapaPDF[dyeNorm]; }
-          else if (dyeBase !== codigoDYE && mapaPDF.hasOwnProperty(dyeBase)) { precioEncontrado = mapaPDF[dyeBase]; }
-        }
-      }
-    precios.push([precioEncontrado !== null ? precioEncontrado : TEXTO_NO_ENCONTRADO]);
+    var precio = buscarPrecio(codigoDJI, codigoDYE, mapas);
+    precios.push([precio !== null ? precio : TEXTO_NO_ENCONTRADO]);
   }
 
   hoja.getRange(def.filaInicio, def.colPrecio, filasData, 1).setValues(precios);
@@ -215,239 +102,129 @@ function procesarHojaDestino(ssDestino, def, mapas, mapaPDF) {
 }
 
 // =============================================================================
-// FUENTE TERCIARIA: PDF
+// BÚSQUEDA DE PRECIO
 // =============================================================================
 
 /**
- * Devuelve el mapa { codigo: precio } del PDF.
- * Usa PropertiesService como caché; el PDF se parsea solo la primera vez
- * (o cuando se ejecuta refrescarCachePDF() manualmente).
+ * Intenta primero por CODIGO DJI (→ SKU del origen),
+ * luego por CODIGO DYE (→ código interno del origen).
+ * Cada búsqueda prueba: exacto, sin guiones, sin último sufijo, combinación.
  */
-function obtenerMapaPDF() {
-  try {
-    var cached = PropertiesService.getScriptProperties().getProperty(PDF_CACHE_KEY);
-    if (cached) {
-      var mapa = JSON.parse(cached);
-      Logger.log('PDF: usando caché (' + Object.keys(mapa).length + ' códigos).');
-      return mapa;
-    }
-    return parsearPDF();
-  } catch (e) {
-    Logger.log('ERROR en obtenerMapaPDF: ' + e.message);
-    return {};
+function buscarPrecio(codigoDJI, codigoDYE, mapas) {
+  if (codigoDJI !== "" && codigoDJI !== "0") {
+    var p = buscarEnMapa(codigoDJI, mapas.sku);
+    if (p !== null) return p;
   }
+  if (codigoDYE !== "" && codigoDYE !== "0") {
+    var p2 = buscarEnMapa(codigoDYE, mapas.interno);
+    if (p2 !== null) return p2;
+  }
+  return null;
 }
 
 /**
- * Convierte el PDF a texto usando OCR (copia temporal como Google Doc),
- * parsea los códigos y precios, cachea el resultado y elimina la copia.
+ * Busca un código en un mapa probando 4 variantes de normalización.
  */
-function parsearPDF() {
-  var copiaTempId = null;
-  try {
-    // Crear copia como Google Doc para que Drive aplique OCR automáticamente.
-    // Usamos la API REST directamente para evitar habilitar el servicio avanzado de Drive.
-    var token    = ScriptApp.getOAuthToken();
-    var response = UrlFetchApp.fetch(
-      'https://www.googleapis.com/drive/v3/files/' + PDF_ID + '/copy',
-      {
-        method      : 'post',
-        contentType : 'application/json',
-        headers     : { 'Authorization': 'Bearer ' + token },
-        payload     : JSON.stringify({
-          name     : 'ocr_tmp_pricelist_' + Date.now(),
-          mimeType : 'application/vnd.google-apps.document'
-        })
-      }
-    );
-    var copia = JSON.parse(response.getContentText());
-    copiaTempId = copia.id;
-    Utilities.sleep(5000);  // Esperar a que el OCR termine
-
-    var texto = DocumentApp.openById(copiaTempId).getBody().getText();
-    var mapa  = parsearTextoPDF(texto);
-
-    PropertiesService.getScriptProperties().setProperty(PDF_CACHE_KEY, JSON.stringify(mapa));
-    Logger.log('PDF parseado y cacheado: ' + Object.keys(mapa).length + ' códigos indexados.');
-    return mapa;
-
-  } catch (e) {
-    Logger.log('ERROR en parsearPDF: ' + e.message);
-    return {};
-  } finally {
-    if (copiaTempId) {
-      try { DriveApp.getFileById(copiaTempId).setTrashed(true); } catch (ex) {}
-    }
-  }
-}
-
-/**
- * Extrae { codigo: precio } del texto OCR del PDF.
- *
- * Formato esperado: [CODIGO_DJI / CODIGO_DYE] Descripción ... USD X,XX
- * (el usuario confirmó: primero=DJI, segundo=DYE)
- *
- * Indexa ambos códigos con y sin guiones al mismo precio.
- */
-function parsearTextoPDF(texto) {
-  var mapa   = {};
-  // Captura: grupo1=CODIGO_DJI, grupo2=CODIGO_DYE, grupo3=precio numérico
-  var patron = /\[([^\]\/]+?)\s*\/\s*([^\]]+?)\][^\[]*?USD\s*([\d]+[,\.][\d]+)/gi;
-  var match;
-
-  while ((match = patron.exec(texto)) !== null) {
-    var codigoDJI = match[1].trim();
-    var codigoDYE = match[2].trim();
-    // Normalizar separador decimal: coma → punto
-    var precio    = parseFloat(match[3].replace(',', '.'));
-    if (isNaN(precio)) continue;
-
-    [codigoDJI, codigoDYE].forEach(function(cod) {
-      if (!cod) return;
-      mapa[cod] = precio;
-      var norm = sinGuiones(cod);
-      if (norm !== cod) mapa[norm] = precio;
-      var base = normalizarCodigo(cod);
-      if (base !== cod && !mapa.hasOwnProperty(base)) mapa[base] = precio;
-    });
-  }
-  return mapa;
-}
-
-/**
- * Borra la caché del PDF y lo reparsea inmediatamente.
- * Ejecutar manualmente desde el editor si el PDF fue reemplazado.
- */
-function refrescarCachePDF() {
-  PropertiesService.getScriptProperties().deleteProperty(PDF_CACHE_KEY);
-  var mapa = parsearPDF();
-  Logger.log('Caché del PDF refrescada. Códigos indexados: ' + Object.keys(mapa).length);
+function buscarEnMapa(codigo, mapa) {
+  if (!mapa) return null;
+  // 1. Exacto
+  if (mapa.hasOwnProperty(codigo)) return mapa[codigo];
+  // 2. Sin guiones
+  var norm = sinGuiones(codigo);
+  if (norm !== codigo && mapa.hasOwnProperty(norm)) return mapa[norm];
+  // 3. Sin último sufijo
+  var base = normalizarCodigo(codigo);
+  if (base !== codigo && mapa.hasOwnProperty(base)) return mapa[base];
+  // 4. Sin sufijo + sin guiones
+  var baseNorm = sinGuiones(base);
+  if (baseNorm !== base && mapa.hasOwnProperty(baseNorm)) return mapa[baseNorm];
+  return null;
 }
 
 // =============================================================================
-// FUNCIÓN AUXILIAR: construir mapas de lookup
+// CONSTRUIR MAPAS DE LOOKUP DESDE LA PLANILLA ORIGEN
 // =============================================================================
 
 /**
- * Por cada hoja definida en HOJAS_ORIGEN:
- *   - Encuentra la columna "Código SKU" buscando el encabezado en la fila 1.
- *   - Lee todos los datos y crea un objeto { codigoSKU: precio }.
+ * Lee la planilla origen y construye dos mapas de búsqueda:
+ *   mapas.sku     → { SKU: precio }      (búsqueda por CODIGO DJI)
+ *   mapas.interno → { INTERNO: precio }  (búsqueda por CODIGO DYE)
  *
- * @param {Spreadsheet} ssOrigen - Objeto Spreadsheet del archivo origen.
- * @returns {Object} Diccionario con clave = nombre de hoja, valor = mapa { sku: precio }.
+ * Formato esperado en col A: "[SKU / INTERNO] descripción del producto"
+ * Formato esperado en col B: "USD 1,50"
+ *
+ * Cada código se indexa también en sus variantes (sin guiones, sin sufijo).
  */
 function construirMapasLookup(ssOrigen) {
-  var resultado = {};
-
-  for (var i = 0; i < HOJAS_ORIGEN.length; i++) {
-    var def  = HOJAS_ORIGEN[i];
-    var hoja = ssOrigen.getSheetByName(def.nombre);
-
-    if (!hoja) {
-      Logger.log('ADVERTENCIA: Hoja "' + def.nombre + '" no encontrada en el origen. Se omite.');
-      resultado[def.nombre] = {};
-      continue;
-    }
-
-    var datos = hoja.getDataRange().getValues();  // [[fila1col1, fila1col2, ...], ...]
-    if (datos.length < 2) {
-      Logger.log('ADVERTENCIA: Hoja "' + def.nombre + '" tiene menos de 2 filas. Se omite.');
-      resultado[def.nombre] = {};
-      continue;
-    }
-
-    // Buscar las columnas por encabezado (búsqueda dinámica)
-    var encabezados = datos[0];
-    var colSKU      = -1;
-    var colInterno  = def.colInterno - 1;  // Posición fija según configuración (base 0)
-
-    for (var c = 0; c < encabezados.length; c++) {
-      if (String(encabezados[c]).trim() === ENCABEZADO_SKU) {
-        colSKU = c;
-        break;
-      }
-    }
-
-    if (colSKU === -1) {
-      Logger.log('ADVERTENCIA: Columna "' + ENCABEZADO_SKU + '" no encontrada en hoja "' + def.nombre + '". Se omite.');
-      resultado[def.nombre] = { exacto: {}, base: {}, interno: {}, internoBase: {} };
-      continue;
-    }
-
-    // Columna de precio (índice base 0)
-    var colPrecio = def.colPrecio - 1;
-
-    // Construir los cuatro mapas de búsqueda
-    var mapaExacto      = {};  // SKU exacto         → precio  (búsqueda primaria)
-    var mapaBase        = {};  // SKU sin sufijo      → precio  (búsqueda primaria fallback)
-    var mapaInterno     = {};  // Código interno exacto          → precio  (búsqueda secundaria)
-    var mapaInternoBase = {};  // Código interno sin sufijo       → precio  (búsqueda secundaria fallback)
-    var mapaInternoNorm = {};  // Código interno sin guiones      → precio  (búsqueda secundaria fallback)
-
-    for (var r = 1; r < datos.length; r++) {
-      var precio = datos[r][colPrecio];
-
-      // Mapa SKU (primario)
-      var sku = String(datos[r][colSKU]).trim();
-      if (sku !== "" && sku !== "0") {
-        mapaExacto[sku] = precio;
-        var skuBase = normalizarCodigo(sku);
-        if (skuBase !== sku && !mapaBase.hasOwnProperty(skuBase)) {
-          mapaBase[skuBase] = precio;
-        }
-      }
-
-      // Mapa Código interno (secundario)
-      var interno = String(datos[r][colInterno]).trim();
-      if (interno !== "" && interno !== "0") {
-        mapaInterno[interno] = precio;
-        var internoBase = normalizarCodigo(interno);
-        if (internoBase !== interno && !mapaInternoBase.hasOwnProperty(internoBase)) {
-          mapaInternoBase[internoBase] = precio;
-        }
-        // Índice sin guiones: DJI-R891 y DJIR891 resuelven al mismo precio
-        var internoNorm = sinGuiones(interno);
-        if (internoNorm !== interno && !mapaInternoNorm.hasOwnProperty(internoNorm)) {
-          mapaInternoNorm[internoNorm] = precio;
-        }
-      }
-    }
-
-    resultado[def.nombre] = { exacto: mapaExacto, base: mapaBase, interno: mapaInterno, internoBase: mapaInternoBase, internoNorm: mapaInternoNorm };
-    Logger.log('Hoja "' + def.nombre + '": ' + Object.keys(mapaExacto).length + ' SKUs | ' + Object.keys(mapaInterno).length + ' códigos internos cargados.');
+  var hoja = ORIGEN_HOJA ? ssOrigen.getSheetByName(ORIGEN_HOJA) : ssOrigen.getSheets()[0];
+  if (!hoja) {
+    Logger.log('ERROR: No se encontró la hoja origen.');
+    return { sku: {}, interno: {} };
   }
 
-  return resultado;
+  var datos       = hoja.getDataRange().getValues();
+  var mapaSKU     = {};
+  var mapaInterno = {};
+  var patron      = /^\[([^\]\/]+?)\s*\/\s*([^\]]+?)\]/;  // Extrae [SKU / INTERNO]
+
+  for (var r = 0; r < datos.length; r++) {
+    var celda  = String(datos[r][0]).trim();
+    var precio = parsearPrecio(String(datos[r][1]).trim());
+    if (precio === null) continue;
+
+    var match = patron.exec(celda);
+    if (!match) continue;
+
+    indexarCodigo(match[1].trim(), precio, mapaSKU);
+    indexarCodigo(match[2].trim(), precio, mapaInterno);
+  }
+
+  Logger.log('Origen cargado: ' + Object.keys(mapaSKU).length + ' SKUs | ' + Object.keys(mapaInterno).length + ' códigos internos.');
+  return { sku: mapaSKU, interno: mapaInterno };
+}
+
+/**
+ * Agrega un código y sus variantes normalizadas al mapa.
+ */
+function indexarCodigo(codigo, precio, mapa) {
+  if (!codigo) return;
+  mapa[codigo] = precio;
+  var norm = sinGuiones(codigo);
+  if (norm !== codigo) mapa[norm] = precio;
+  var base = normalizarCodigo(codigo);
+  if (base !== codigo && !mapa.hasOwnProperty(base)) mapa[base] = precio;
+  var baseNorm = sinGuiones(base);
+  if (baseNorm !== base && !mapa.hasOwnProperty(baseNorm)) mapa[baseNorm] = precio;
+}
+
+/**
+ * Parsea "USD 1,50" o "USD 12.00" → 1.5 / 12.0
+ * Devuelve null si no puede parsear.
+ */
+function parsearPrecio(texto) {
+  var match = /USD\s*([\d]+[,\.][\d]+)/i.exec(texto);
+  if (!match) return null;
+  return parseFloat(match[1].replace(',', '.'));
 }
 
 // =============================================================================
-// DIAGNÓSTICO — Ejecutar una vez para identificar la cuenta y verificar accesos
+// DIAGNÓSTICO
 // =============================================================================
 
-/**
- * Muestra en el log la cuenta que ejecuta el script y si tiene acceso
- * a los dos archivos de Sheets configurados.
- */
 function diagnostico() {
-  try { Logger.log("Cuenta activa: "    + Session.getActiveUser().getEmail()); }
-  catch (e) { Logger.log("Cuenta activa: (no disponible) — " + e.message); }
-
-  try { Logger.log("Cuenta efectiva: "  + Session.getEffectiveUser().getEmail()); }
-  catch (e) { Logger.log("Cuenta efectiva: (no disponible) — " + e.message); }
+  try { Logger.log("Cuenta activa: " + Session.getActiveUser().getEmail()); }
+  catch (e) { Logger.log("Cuenta: (no disponible) — " + e.message); }
 
   try {
     var o = SpreadsheetApp.openById(ORIGEN_ID);
-    Logger.log("ORIGEN OK: " + o.getName());
-  } catch (e) {
-    Logger.log("ORIGEN ERROR: " + e.message);
-  }
+    var h = ORIGEN_HOJA ? o.getSheetByName(ORIGEN_HOJA) : o.getSheets()[0];
+    Logger.log("ORIGEN OK: " + o.getName() + " | Hoja: " + (h ? h.getName() : 'NO ENCONTRADA') + " | Filas: " + (h ? h.getLastRow() : 0));
+  } catch (e) { Logger.log("ORIGEN ERROR: " + e.message); }
 
   try {
     var d = SpreadsheetApp.openById(DESTINO_ID);
     Logger.log("DESTINO OK: " + d.getName());
-  } catch (e) {
-    Logger.log("DESTINO ERROR: " + e.message);
-  }
+  } catch (e) { Logger.log("DESTINO ERROR: " + e.message); }
 }
 
 // =============================================================================
@@ -455,25 +232,15 @@ function diagnostico() {
 // =============================================================================
 
 /**
- * Instala un trigger de tiempo que ejecuta actualizarPrecios() cada 1 hora.
- * EJECUTAR SOLO UNA VEZ manualmente desde el editor de Apps Script.
- * Si ya existe un trigger previo de esta función, lo elimina antes de crear uno nuevo.
+ * Instala un trigger que ejecuta actualizarPrecios() cada 1 hora.
+ * Ejecutar solo una vez manualmente.
  */
 function instalarTrigger() {
-  eliminarTriggers();  // Limpia duplicados
-
-  ScriptApp.newTrigger("actualizarPrecios")
-    .timeBased()
-    .everyHours(1)
-    .create();
-
-  Logger.log("Trigger instalado: actualizarPrecios se ejecutará cada 1 hora.");
+  eliminarTriggers();
+  ScriptApp.newTrigger("actualizarPrecios").timeBased().everyHours(1).create();
+  Logger.log("Trigger instalado: actualizarPrecios cada 1 hora.");
 }
 
-/**
- * Elimina todos los triggers asociados a actualizarPrecios().
- * Útil para desinstalar o cambiar la frecuencia.
- */
 function eliminarTriggers() {
   var triggers = ScriptApp.getProjectTriggers();
   for (var i = 0; i < triggers.length; i++) {
